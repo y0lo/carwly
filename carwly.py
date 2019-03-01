@@ -94,7 +94,27 @@ def parse_cars_autoru(content):
 
 
 def parse_cars_avito(content):
-    pass
+    cars = []
+    page = html.fromstring(content)
+    xpath_req = "//*[contains(@class, 'catalog-list js-catalog-list clearfix')]/div/div"
+    for el in page.xpath(xpath_req):
+        if el.get('id') and re.search("i\d+", el.get('id')):
+            if el.get('id') and re.search("i\d+", el.get('id')):
+                price = el.xpath(".//*[contains(@class, 'price ')]/text()")[0]
+                price = int(re.sub(' +', '', price))
+                mileage = el.xpath(".//*[contains(@class, 'specific-params specific-params_block')]/text()")[0]
+                mileage = re.search('(\d+)(\S+)', mileage.replace(' ', '')).group(1)
+                title = el.xpath(".//*[contains(@class, 'item-description-title-link')]/span/text()")[0]
+                desc_regex = re.search("(\A.+), (\d\d\d\d)", title)
+                name = desc_regex.group(1)
+                year = int(desc_regex.group(2))
+                link = el.xpath(".//*/a[contains(@class, 'item-description-title-link')]/@href")[0]
+                link = 'https://www.avito.ru' + link
+                id = hash(link)
+                cars.append(Car(url=link, id=int(id), name=name, price=price, mileage=mileage, year=year))
+    if 0 == len(cars):
+        raise ParserException(content)
+    return cars
 
 
 search_autoru = Search(
@@ -114,6 +134,18 @@ search_autoru = Search(
         "spravka": "dD0xNTQyMjEwMTg5O2k9ODQuNDcuMTg5Ljc5O3U9MTU0MjIxMDE4OTY2MjYwMDEwMTtoPTAxY2I3MWYzMzAzOTI2NjNkNjg1NTc1YWFmZjUzNTM3"
     }),
     parse_cars_autoru
+)
+
+search_avito = Search(
+    "https://www.avito.ru/sankt-peterburg/avtomobili/s_probegom/inomarki/levyy_rul/odin_vladelec?pmax=600000&pmin=0&user=1&radius=0&s_trg=3&f=187_870-872-4804-4806.188_900b.185_860-861-14753.1374_15786b&s=104",
+    partial(requests.get, verify=False, headers={
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3477.0 Safari/537.36',
+        'Cache-Control': 'max-age=0',
+        'Connection': 'keep-alive',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://hui.ru/?from=wizard.brand'
+    }),
+    parse_cars_avito
 )
 
 def carToStr(car):
@@ -142,7 +174,7 @@ if __name__ == "__main__":
 
     db_cars = set()
     new_car_counter = 0
-    postFilter = re.compile("Nissan|Opel|Volkswagen|Skoda|Suzuki|Mitsubishi|Toyota|Mazda|KIA|Volvo|Kyron", flags=re.I)
+    postFilter = re.compile("Nissan|Opel|Volkswagen|Octavia|Suzuki|Mitsubishi|Toyota|Mazda|KIA|Volvo|SsangYong|Dodge", flags=re.I)
 
     # Load DB
     if os.path.isfile(DB_CARS_FILE_NAME):
@@ -151,7 +183,7 @@ if __name__ == "__main__":
             logger.info("DB file is opened: " + DB_CARS_FILE_NAME)
 
     try:
-        tasks = [search_autoru]
+        tasks = [search_avito, search_autoru]
 
         #Log session data
         logger.info("Started: " + str(datetime.datetime.now()))
