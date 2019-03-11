@@ -117,45 +117,28 @@ def parse_cars_avito(content):
     return cars
 
 
-search_autoru = Search(
-    "https://auto.ru/sankt-peterburg/cars/vendor15/used/?year_from=2007&price_to=600000&displacement_from=1600&seller_group=PRIVATE&owners_count_group=ONE&transmission=MECHANICAL&transmission=AUTOMATIC&transmission=VARIATOR&body_type_group=ALLROAD_5_DOORS&body_type_group=LIFTBACK&body_type_group=WAGON&body_type_group=HATCHBACK_5_DOORS&body_type_group=MINIVAN&sort=cr_date-desc&output_type=table&page=1",
-    partial(requests.get, verify=False, headers={
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3477.0 Safari/537.36',
-        'Cache-Control': 'max-age=0',
-        'Connection': 'keep-alive',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://auto.ru/?from=wizard.brand&utm_source=auto_wizard&utm_medium=desktop&utm_campaign=common&utm_content=listing&utm_term=%D0%B0%D0%B2%D1%82%D0%BE%D1%80%D1%83&geo_id=2'
-    }, cookies={
-        "from_lifetime": "1542209996487",
-        "from": "direct",
-        "autoru_sid": "a%3Ag5bec41cc2052uv2gdl6gfk4jfk80nl9.32e00ee7e20e3f3eb1453226702ee924%7C1542209996492.604800.MEhrmwvzWh9mxCvLIIUqqg.I0KxVTkTyZGQkNygOE52MB1rsAGvE7rlZy6zAFUqKfo",
-        "autoruuid": "g5bec41cc2052uv2gdl6gfk4jfk80nl9.32e00ee7e20e3f3eb1453226702ee924",
-        "gdpr": "1", "X-Vertis-DC": "myt",
-        "spravka": "dD0xNTQyMjEwMTg5O2k9ODQuNDcuMTg5Ljc5O3U9MTU0MjIxMDE4OTY2MjYwMDEwMTtoPTAxY2I3MWYzMzAzOTI2NjNkNjg1NTc1YWFmZjUzNTM3"
-    }),
-    parse_cars_autoru
-)
+def get_parser_handler(url):
+    hostname = urlparse(url).hostname
+    if "auto.ru" in hostname:
+       return parse_cars_autoru
+    elif "avito" in hostname:
+        return parse_cars_avito
+    else:
+        raise ValueError("Parser for {} was not defined.".format(hostname))
 
-search_avito = Search(
-    "https://www.avito.ru/sankt-peterburg/avtomobili/s_probegom/inomarki/levyy_rul/odin_vladelec?pmax=600000&pmin=0&user=1&radius=0&s_trg=3&f=187_870-872-4804-4806.188_900b.185_860-861-14753.1374_15786b&s=104",
-    partial(requests.get, verify=False, headers={
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3477.0 Safari/537.36',
-        'Cache-Control': 'max-age=0',
-        'Connection': 'keep-alive',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://hui.ru/?from=wizard.brand'
-    }),
-    parse_cars_avito
-)
 
-def carToStr(car):
+def car_to_str(car):
     return "{:<40} {:>10} {:>10}p {:>10}km {:<120}".format(car.name, car.year, car.price, car.mileage, car.url)
+
 
 if __name__ == "__main__":
     import pickle
     import time
     import random
     import re
+
+    from config import CARWLY_CONFIG as CONFIG
+    from tgbot import TGBot
 
     DB_CARS_FILE_NAME = "./cars.pickle"
     LOG_DIR = "./log"
@@ -174,7 +157,7 @@ if __name__ == "__main__":
 
     db_cars = set()
     new_car_counter = 0
-    postFilter = re.compile("Nissan|Opel|Volkswagen|Octavia|Suzuki|Mitsubishi|Toyota|Mazda|KIA|Volvo|SsangYong|Dodge", flags=re.I)
+    postFilter = re.compile(CONFIG["car_filter_regex_str"], flags=re.I)
 
     # Load DB
     if os.path.isfile(DB_CARS_FILE_NAME):
@@ -182,13 +165,32 @@ if __name__ == "__main__":
             db_cars = pickle.Unpickler(db_file).load()
             logger.info("DB file is opened: " + DB_CARS_FILE_NAME)
 
-    try:
-        tasks = [search_avito, search_autoru]
+    #Init Bot
 
-        #Log session data
+    bot = TGBot(token=CONFIG['tg_bot']['token'])
+
+    bot_params = {'chat_id': CONFIG['tg_bot']['chat_id'],
+                  'parse_mode': 'Markdown',
+                  'disable_web_page_preview': True
+                  }
+    bot_text_template = "[{name}]({link})\r\n{price}p\r\n{year}\r\n{mileage}km"
+
+    try:
         logger.info("Started: " + str(datetime.datetime.now()))
-        for task in tasks:
-            logger.info("Link: " + str(task.url))
+
+        tasks = []
+        for task_cfg in CONFIG['parser_tasks']:
+            tasks.append(Search(
+                task_cfg['url'],
+                partial(requests.get,
+                        verify=False,
+                        headers=task_cfg['headers'] if 'headers' in task_cfg else None,
+                        cookies=task_cfg['cookies'] if 'cookies' in task_cfg else None
+                        ),
+                get_parser_handler(task_cfg['url'])
+            ))
+            #Log session data
+            logger.info("Link: " + str(task_cfg['url']))
 
         while True:
             for task in tasks:
@@ -201,7 +203,15 @@ if __name__ == "__main__":
                         db_cars.add(car)
                         # Show if suitable
                         if postFilter.match(car.name):
-                            print("{:<5} {}".format(new_car_counter, carToStr(car)))
+                            print("{:<5} {}".format(new_car_counter, car_to_str(car)))
+                            bot_params['text'] = bot_text_template.format(
+                                name=car.name,
+                                link=car.url,
+                                price=car.price,
+                                year=car.year,
+                                mileage=car.mileage)
+                            bot.send_message_params(params=bot_params)
+
             # Polling interval
             time.sleep(60 + random.randint(1, 40))
 
