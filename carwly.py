@@ -138,7 +138,7 @@ if __name__ == "__main__":
     import re
 
     from config import CARWLY_CONFIG as CONFIG
-    from tgbot import TGBot
+    import tgbot
 
     DB_CARS_FILE_NAME = "./cars.pickle"
     LOG_DIR = "./log"
@@ -166,13 +166,7 @@ if __name__ == "__main__":
             logger.info("DB file is opened: " + DB_CARS_FILE_NAME)
 
     #Init Bot
-
-    bot = TGBot(token=CONFIG['tg_bot']['token'])
-
-    bot_params = {'chat_id': CONFIG['tg_bot']['chat_id'],
-                  'parse_mode': 'Markdown',
-                  'disable_web_page_preview': True
-                  }
+    bot = tgbot.TelegramBot(token=CONFIG['tg_bot']['token'], chat_id=CONFIG['tg_bot']['chat_id'])
     bot_text_template = "[{name}]({link})\r\n{price}p\r\n{year}\r\n{mileage}km"
 
     try:
@@ -204,14 +198,15 @@ if __name__ == "__main__":
                         # Show if suitable
                         if postFilter.match(car.name):
                             print("{:<5} {}".format(new_car_counter, car_to_str(car)))
-                            bot_params['text'] = bot_text_template.format(
-                                name=car.name,
-                                link=car.url,
-                                price=car.price,
-                                year=car.year,
-                                mileage=car.mileage)
-                            bot.send_message_params(params=bot_params)
-
+                            try:
+                                bot.send_message(text=bot_text_template.format(
+                                    name=car.name,
+                                    link=car.url,
+                                    price=car.price,
+                                    year=car.year,
+                                    mileage=car.mileage), parse_mode='Markdown')
+                            except tgbot.TelegramError as e:
+                                logger.warning("Telegram: " + str(e))
             # Polling interval
             time.sleep(60 + random.randint(1, 40))
 
